@@ -50,6 +50,21 @@ class BDA(nn.Module):  #beat_downbeat_activation
         out = out.transpose(1, 2)
         return out
 
+    def train_forward(self, data):
+        """Forward pass for training — stateless LSTM (no persistent hidden state).
+        Each sequence in the batch is processed independently."""
+        x = data
+        x = torch.reshape(x, (-1, self.dim_in))
+        x = x.unsqueeze(0).transpose(0, 1)
+        x = F.max_pool1d(F.relu(self.conv1(x)), 2)
+        x = x.view(-1, self.num_flat_features(x))
+        x = self.linear0(x)
+        x = torch.reshape(x, (data.shape[0], data.shape[1], self.conv_out))
+        x = self.lstm(x)[0]
+        out = self.linear(x)
+        out = out.transpose(1, 2)
+        return out
+
     def final_pred(self, input):
         return self.softmax(input)
 

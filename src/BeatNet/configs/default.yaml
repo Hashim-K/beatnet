@@ -1,0 +1,44 @@
+# BeatNet Training Configuration
+# ================================
+# Override any parameter via CLI: python -m BeatNet.train --config configs/default.yaml learning_rate=0.001
+
+# Audio / feature extraction parameters
+sample_rate: 22050
+hop_length: 441        # 20ms at 22050Hz (50 fps)
+win_length: 1411       # 64ms at 22050Hz
+n_bands: 24
+feature_dim: 272       # 136 log-filtered spectrogram + 136 spectral difference
+
+# Model architecture
+num_cells: 150         # LSTM hidden size
+num_layers: 2          # number of LSTM layers
+
+# Training hyperparameters
+batch_size: 200
+learning_rate: 0.0005  # 5e-4, Adam optimizer
+seq_len: 400           # 8 seconds at 50fps
+max_epochs: 10000
+patience: 20           # early stopping: stop after this many epochs with no val improvement
+class_weights: [50, 400, 5]  # cross-entropy weights for [beat, downbeat, non-beat]
+seed: 42
+num_workers: 4
+
+# Dataset configuration
+data_dir: ./data              # root directory for prepared (pickled) data
+datasets:
+  train: [BALLROOM, BEATLES, CMR, ROCK_CORPUS]
+  test: [GTZAN]
+dataset_weights:              # oversampling multiplier per training dataset
+  BALLROOM: 1
+  BEATLES: 6
+  CMR: 1
+  ROCK_CORPUS: 6
+train_val_split: 0.9          # fraction of non-test data used for training (rest is validation)
+
+# Checkpointing and logging
+output_dir: ./output
+checkpoint_every: 10          # validate and checkpoint every N epochs
+val_inference: DBN            # inference method for validation: DBN or PF
+
+# Device
+device: cpu                   # cpu, cuda, cuda:0, mps
