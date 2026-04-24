@@ -23,9 +23,13 @@ REQUIRED_PACKAGES = [
     'librosa>=0.8.0',
     'scipy',
     'mido>=1.2.6',
-    'madmom',
-    'torch',
+    'pytest',
+    #'pyaudio',
+    'madmom>=0.16.1',
+    'torch>=1.9.0',
     'Matplotlib',
+    'tensorboard>=2.0',
+    'pyyaml>=5.0',
 ]
 
 
@@ -58,7 +62,7 @@ setuptools.setup(
 
     # Package details
     name="BeatNet",
-    version="1.1.4",
+    version="1.2.0",
     python_requires=">=3.10",
     package_dir={"": "src"},
     packages=find_packages(where="src"),

@@ -8,6 +8,8 @@ This mode captures streaming audio directly from the microphone.
 + **Online mode:** Similar to Real-time mode, Online mode employs the same causal algorithm for track processing. However, rather than reading the files in real-time, it reads them faster, while still producing identical outcomes to the real-time mode.
 + **Offline mode:** Inferes beats and downbeats in an offline fashion. 
 
+**New in v1.2.0**: The official training pipeline is now included. You can train the BeatNet CRNN from scratch on your own data or reproduce the paper's results using the provided training scripts, dataset handlers, and test suite.
+
 To gain a better understanding of each mode, please refer to the Usage examples provided in this document.
 
 
@@ -38,7 +40,7 @@ This repository contains the user package and the source code of the Monte Carlo
 
 In addition to the proposed online inference, we added madmom's DBN beat/downbeat inference model for the offline usages. Note that, the offline model still utilize BeatNet's neural network rather than that of Madmom which leads to better performance and significantly faster results.
 
-Note: All models are trained using ***pytorch*** and are included in the models folder. In order to recieve the training script and the datasets data/feature handlers, shoot me an email at mheydari [at] ur.rochester.edu   
+Note: All pre-trained models are included in the `models` folder. The official training script is now part of this repository (see **Training** section below).
 
 
 System Input:
@@ -125,6 +127,154 @@ from BeatNet.BeatNet import BeatNet
 estimator = BeatNet(1, mode='offline', inference_model='DBN', plot=[], thread=False)
 
 Output = estimator.process("audio file directory")
+```
+
+Training:
+-----------
+
+The official training pipeline is included in this repository. Training involves three steps: data preparation, training, and evaluation.
+
+### Prerequisites
+
+Install the required packages:
+```
+pip install BeatNet
+```
+Or install from source:
+```
+pip install -e .
+```
+
+**Note on madmom compatibility:** madmom 0.16.1 has compatibility issues with Python >= 3.10 and NumPy >= 1.24. If you encounter `ImportError: cannot import name 'MutableSequence' from 'collections'` or `AttributeError: module 'numpy' has no attribute 'float'`, you can either (a) use Python 3.9, or (b) apply the following fixes to your madmom installation:
+- In `madmom/processors.py`, change `from collections import MutableSequence` to `from collections.abc import MutableSequence`
+- For numpy alias errors in compiled Cython extensions, add this to your Python's `sitecustomize.py`:
+```python
+import numpy as np
+if not hasattr(np, 'float'): np.float = np.float64
+if not hasattr(np, 'int'): np.int = np.int_
+```
+
+### Step 1: Prepare Data
+
+Organize your raw dataset with the following structure:
+```
+raw_datasets/
+    ballroom/
+        audio/ChaChaCha/track001.wav
+        audio/Waltz/track002.wav
+        ...
+        annotations/track001.beats
+        annotations/track002.beats
+        ...
+    gtzan/
+        audio/blues/track001.wav
+        ...
+        annotations/track001.beats
+        ...
+```
+
+The `.beats` annotation format is one line per beat: `<time_in_seconds> <beat_number>`, where `beat_number == 1` indicates a downbeat.
+
+Extract features and annotations:
+```
+python -m BeatNet.prepare_data --config src/BeatNet/configs/default.yaml \
+    --raw_dir /path/to/raw_datasets \
+    --dataset BALLROOM GTZAN BEATLES CMR ROCK_CORPUS
+```
+
+This creates pickled per-track feature files under `./data/` (configurable via `--data_dir`).
+
+### Step 2: Train
+
+```
+python -m BeatNet.train --config src/BeatNet/configs/default.yaml
+```
+
+Key configuration options (set in `configs/default.yaml` or as CLI overrides):
+```
+python -m BeatNet.train --config src/BeatNet/configs/default.yaml \
+    learning_rate=0.001 batch_size=128 device=cuda
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `batch_size` | 200 | Training batch size |
+| `learning_rate` | 5e-4 | Adam optimizer learning rate |
+| `seq_len` | 400 | Training sequence length in frames (8 seconds at 50fps) |
+| `max_epochs` | 10000 | Maximum training epochs |
+| `patience` | 20 | Early stopping patience (epochs) |
+| `class_weights` | [50, 400, 5] | Cross-entropy weights for [beat, downbeat, non-beat] |
+| `checkpoint_every` | 10 | Validate and save every N epochs |
+| `val_inference` | DBN | Inference method for validation (DBN or PF) |
+| `device` | cpu | Device (cpu, cuda, cuda:0, mps) |
+
+Training outputs are saved to `./output/` (configurable via `output_dir`):
+- `best_model_weights.pt` -- Best model weights (by validation beat F-measure), directly loadable by the inference code
+- `checkpoint_epoch_N.pt` -- Full checkpoints (model + optimizer state) for resuming
+- `tensorboard/` -- TensorBoard training logs
+
+To resume training from a checkpoint:
+```
+python -m BeatNet.train --config src/BeatNet/configs/default.yaml \
+    --resume output/checkpoint_epoch_100.pt
+```
+
+Monitor training progress with TensorBoard:
+```
+tensorboard --logdir output/tensorboard
+```
+
+### Step 3: Use Trained Weights for Inference
+
+The saved `best_model_weights.pt` is directly compatible with the inference code:
+```python
+from BeatNet.BeatNet import BeatNet
+import torch
+
+estimator = BeatNet(1, mode='online', inference_model='PF', plot=[])
+estimator.model.load_state_dict(
+    torch.load('output/best_model_weights.pt', map_location='cpu'), strict=False
+)
+output = estimator.process("audio_file.wav")
+```
+
+Testing:
+-----------
+
+The repository includes a test suite that validates the full training pipeline using synthetic toy data:
+```
+python test/test_training.py
+```
+
+The test suite covers:
+- Ground truth construction and annotation parsing
+- Dataset loading in training mode (random crops) and validation mode (full tracks)
+- Model forward pass shape and statelessness
+- Training loop convergence (loss decreases over epochs)
+- Validation pipeline (model -> DBN decoding -> F-measure evaluation)
+- Weight save/load compatibility with inference code
+- End-to-end pipeline (data creation -> dataset building -> training -> validation -> weight export)
+
+Project Structure:
+-----------
+```
+src/BeatNet/
+    BeatNet.py                  # Main inference handler
+    model.py                    # BDA neural network (with train_forward for training)
+    log_spect.py                # Log-spectrogram feature extraction
+    common.py                   # Feature module base class
+    particle_filtering_cascade.py  # Particle filter inference
+    train.py                    # Training script (entry point)
+    dataset.py                  # PyTorch Dataset and data splitting
+    prepare_data.py             # Data preparation (feature extraction + annotations)
+    configs/
+        default.yaml            # Default training configuration
+    models/
+        model_1_weights.pt      # Pre-trained weights (GTZAN)
+        model_2_weights.pt      # Pre-trained weights (Ballroom)
+        model_3_weights.pt      # Pre-trained weights (Rock Corpus)
+test/
+    test_training.py            # Training pipeline test suite
 ```
 
 Video Tutorial:
